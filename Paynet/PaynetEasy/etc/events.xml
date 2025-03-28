@@ -1,0 +1,9 @@
+<?xml version="1.0"?>
+<config xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="urn:magento:framework:Event/etc/events.xsd">
+    <event name="sales_order_save_after">
+        <observer name="on_status_change" instance="Paynet\PaynetEasy\Observer\StatusChange"/>
+    </event>
+    <event name="payment_method_assign_data">
+        <observer name="save_codform_infos" instance="Paynet\PaynetEasy\Observer\SaveCodInfo"/>
+    </event>
+</config>

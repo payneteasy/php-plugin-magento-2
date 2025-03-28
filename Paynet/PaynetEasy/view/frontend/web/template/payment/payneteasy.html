@@ -1,0 +1,151 @@
+<div class="payment-method" data-bind="css: {'_active': (getCode() == isChecked())}">
+    <div class="payment-method-title field choice">
+        <input type="radio"
+               name="payment[method]"
+               class="radio"
+               data-bind="attr: {'id': getCode()}, value: getCode(), checked: isChecked, click: selectPaymentMethod, visible: isRadioButtonVisible()"/>
+        <label data-bind="attr: {'for': getCode()}" class="label"><span data-bind="text: getTitle()"></span></label>
+    </div>
+
+    <div class="payment-method-content">
+        <!-- ko foreach: getRegion('messages') -->
+        <!-- ko template: getTemplate() --><!-- /ko -->
+        <!--/ko-->
+        <div class="payment-method-billing-address">
+            <!-- ko foreach: $parent.getRegion(getBillingAddressFormName()) -->
+            <!-- ko template: getTemplate() --><!-- /ko -->
+            <!--/ko-->
+        </div>
+        
+        <div class="payneteasy-container">
+          <div class="payneteasy-row">
+            <div class="payneteasy-col">
+              <img data-bind="attr: { src: require.toUrl('Paynet_PaynetEasy/images/logo.png') }">
+            </div>
+            <div class="payneteasy-col">
+              <p data-bind="html: getInstructions()"></p>
+            </div>
+          </div>
+        </div>
+
+        <div class="checkout-agreements-block">
+            <!-- ko foreach: $parent.getRegion('before-place-order') -->
+                <!-- ko template: getTemplate() --><!-- /ko -->
+            <!--/ko-->
+        </div>
+        <!-- ko if: isDirectMethod() -->
+        <!-- ko if: isTestMode() -->
+        <!--/ko-->
+        <form class="form" data-bind="attr: {'id': getCode() + '-form'}">
+            <fieldset data-bind="attr: {class: 'fieldset payment items ' + getCode(), id: 'payment_form_' + getCode()}">
+                <div class="field _required">
+                    <label data-bind="attr: {for: getCode() + '_credit_card_number'}" class="label">
+                        <span><!-- ko i18n: 'Card number'--><!-- /ko --></span>
+                    </label>
+                    <div class="control">
+                        <input data-validate="{'required-entry':true}" style="max-width:50%;" type="text" name="payment[credit_card_number]" class="input-text" value=""
+                               data-bind="attr: {
+                                    id: getCode() + '_credit_card_number',
+                                    title: $t('Card number'),
+                                    'data-container': getCode() + '-credit_card_number',
+                                    'data-validate': JSON.stringify({'required':true})},
+                                    valueUpdate: 'keyup' "/>
+                    </div>
+                </div>
+                <div class="field _required">
+                    <label data-bind="attr: {for: getCode() + '_card_printed_name'}" class="label">
+                        <span><!-- ko i18n: 'Printed name'--><!-- /ko --></span>
+                    </label>
+                    <div class="control">
+                        <input data-validate="{'required-entry':true}" style="max-width:50%;" type="text" name="payment[card_printed_name]" class="input-text" value=""
+                               data-bind="attr: {
+                                    id: getCode() + '_card_printed_name',
+                                    title: $t('Printed name'),
+                                    'data-container': getCode() + '-card_printed_name',
+                                    'data-validate': JSON.stringify({'required':true})},
+                                    valueUpdate: 'keyup' "/>
+                    </div>
+                </div>
+                <div class="field _required">
+                    <div class="control">
+                        <div class="fields group group-3">
+                            <div class="field _required">
+                                <label data-bind="attr: {for: getCode() + '_expire_month'}" class="label">
+                                    <span><!-- ko i18n: 'Expiry month'--><!-- /ko --></span>
+                                </label>
+                                <div class="control">
+                                    <input data-validate="{'required-entry':true}" style="max-width:125px;" type="text" name="payment[expire_month]" class="input-text" value=""
+                                           data-bind="attr: {
+                                                                        id: getCode() + '_expire_month',
+                                                                        title: $t('Expiry month'),
+                                                                        placeholder: 'MM',
+                                                                        size: 2,
+                                                                        max: 12,
+                                                                        min: 01,
+                                                                        maxlength: 2,
+                                                                        minlength: 2,
+                                                                        'data-container': getCode() + '-expire_month',
+                                                                        'data-validate': JSON.stringify({'required':true})},
+                                                                        valueUpdate: 'keyup' "/>
+                                </div>
+                            </div>
+                            <div class="field _required">
+                                <label data-bind="attr: {for: getCode() + '_expire_year'}" class="label">
+                                    <span><!-- ko i18n: 'Expiry year'--><!-- /ko --></span>
+                                </label>
+                                <div class="control">
+                                    <input data-validate="{'required-entry':true}" style="max-width:125px;" type="text" name="payment[expire_year]" class="input-text" value=""
+                                           data-bind="attr: {
+                                                                        id: getCode() + '_expire_year',
+                                                                        title: $t('Expiry year'),
+                                                                        placeholder: 'YYYY',
+                                                                        size: 4,
+                                                                        min: 2024,
+                                                                        maxlength: 4,
+                                                                        minlength: 4,
+                                                                        'data-container': getCode() + '-expire_year',
+                                                                        'data-validate': JSON.stringify({'required':true})},
+                                                                        valueUpdate: 'keyup' "/>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="field _required">
+                    <label data-bind="attr: {for: getCode() + '_cvv2'}" class="label">
+                        <span><!-- ko i18n: 'CVC'--><!-- /ko --></span>
+                    </label>
+                    <div class="control">
+                        <input data-validate="{'required-entry':true}" style="max-width:100px;" type="text" name="payment[cvv2]" class="input-text" value=""
+                               data-bind="attr: {
+                                    id: getCode() + '_cvv2',
+                                    title: $t('CVC'),
+                                    size: 4,
+                                    min: 000,
+                                    maxlength: 4,
+                                    minlength: 3,
+                                    'data-container': getCode() + '-cvv2',
+                                    'data-validate': JSON.stringify({'required':true})},
+                                    valueUpdate: 'keyup' "/>
+                    </div>
+                </div>
+            </fieldset>
+        </form>
+        <!-- /ko -->
+        <div class="actions-toolbar">
+            <div class="primary">
+                <button class="action primary checkout"
+                        type="submit"
+                        data-bind="
+                        click: placeOrder,
+                        attr: {'title': $t('Order payment')},
+                        enable: (getCode() == isChecked()),
+                        css: {disabled: !isPlaceOrderActionAllowed()}
+                        "
+                        disabled>
+                    <span data-bind="i18n: 'Order payment'"></span>
+                </button>
+            </div>
+        </div>
+    </div>
+</div>

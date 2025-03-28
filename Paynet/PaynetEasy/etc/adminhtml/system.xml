@@ -1,0 +1,78 @@
+<?xml version="1.0"?>
+<config xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="urn:magento:module:Magento_Config:etc/system_file.xsd">
+    <system>
+        <section id="payment">
+            <group id="paynet_payneteasy" translate="label" sortOrder="1" showInDefault="1" showInWebsite="1" showInStore="1">
+                <label>Payment system PAYNET</label>
+                <!-- Основные настройки -->
+                <field id="active" translate="label" type="select" sortOrder="1" showInDefault="1" showInWebsite="1" showInStore="0" canRestore="1">
+                    <label>Enable Payment system PAYNET</label>
+                    <source_model>Magento\Config\Model\Config\Source\Yesno</source_model>
+                </field>
+                <field id="title" translate="label" type="text" sortOrder="2" showInDefault="1" showInWebsite="1" showInStore="1" canRestore="1">
+                    <label>Title</label>
+                </field>
+                <field id="instructions" translate="label" type="textarea" sortOrder="3" showInDefault="1" showInWebsite="1" showInStore="1">
+                    <label>Description</label>
+                    <comment>The message which you want it to appear to the customer in the checkout page.</comment>
+                </field>
+                <field id="payment_payneteasy_live_url" translate="label" type="text" sortOrder="4" showInDefault="1" showInWebsite="1" showInStore="0" canRestore="1">
+                    <label>Gateway url (LIVE) *</label>
+                    <validate>required-entry</validate>
+                    <comment>https://gate.payneteasy.com/ etc.</comment>
+                </field>
+                <field id="payment_payneteasy_sandbox_url" translate="label" type="text" sortOrder="5" showInDefault="1" showInWebsite="1" showInStore="0" canRestore="1">
+                    <label>Gateway url (SANDBOX) *</label>
+                    <validate>required-entry</validate>
+                    <comment>https://sandbox.payneteasy.com/ etc.</comment>
+                </field>
+                <field id="payment_payneteasy_three_d_secure" translate="label" type="select" sortOrder="6" showInDefault="1" showInWebsite="1" showInStore="0" canRestore="1">
+                    <label>3D Secure</label>
+                    <source_model>Magento\Config\Model\Config\Source\Yesno</source_model>
+                    <comment>3D Secure or Non 3D Secure (WORK ONLY WITH DIRECT INTEGRATION METHOD)</comment>
+                </field>
+                <field id="payment_payneteasy_endpoint_id" translate="label" type="text" sortOrder="7" showInDefault="1" showInWebsite="1" showInStore="0" canRestore="1">
+                    <label>End point ID *</label>
+                    <validate>required-entry</validate>
+                    <comment>Merchant's client ID is required to call the API</comment>
+                </field>
+                <field id="payment_payneteasy_control_key" translate="label" type="text" sortOrder="8" showInDefault="1" showInWebsite="1" showInStore="0" canRestore="1">
+                    <label>Control Key *</label>
+                    <validate>required-entry</validate>
+                    <comment>Merchant's secret key is required to call the API</comment>
+                </field>
+                <field id="payment_payneteasy_merchant_login" translate="label" type="text" sortOrder="9" showInDefault="1" showInWebsite="1" showInStore="0" canRestore="1">
+                    <label>Login</label>
+                    <comment>Request header used by the merchant resource for additional authentication when accessing the payment gateway.</comment>
+                </field>
+                <field id="payment_payneteasy_test_mode" translate="label" type="select" sortOrder="10" showInDefault="1" showInWebsite="1" showInStore="0" canRestore="1">
+                    <label>Enable test mode</label>
+                    <source_model>Magento\Config\Model\Config\Source\Yesno</source_model>
+                    <comment>In this mode, the payment for the goods is not charged.</comment>
+                </field>
+                <field id="payment_payneteasy_logging" translate="label" type="select" sortOrder="11" showInDefault="1" showInWebsite="1" showInStore="0">
+                    <label>Enable logging</label>
+                    <source_model>Magento\Config\Model\Config\Source\Yesno</source_model>
+                    <comment>Logging is used to debug plugin performance by storing API request data.</comment>
+                </field>
+                <field id="payment_payneteasy_transaction_end_status" translate="label" type="select" sortOrder="12" showInDefault="1" showInWebsite="1" showInStore="1">
+                    <label>Successful transaction order status</label>
+                    <source_model>Magento\Sales\Model\Config\Source\Order\Status</source_model>
+                    <comment>Select the order status to be displayed after successful payment.</comment>
+                </field>
+                <field id="payment_payneteasy_cancel_status" translate="label" type="select" sortOrder="13" showInDefault="1" showInWebsite="1" showInStore="1">
+                    <label>Cancel order state for refund</label>
+                    <source_model>Magento\Sales\Model\Config\Source\Order\Status</source_model>
+                    <comment>Select the order status to be displayed after cancel order.</comment>
+                </field>
+                <field id="payment_payneteasy_payment_method" translate="label" type="select" sortOrder="14" showInDefault="1" showInWebsite="1" showInStore="1">
+                    <label>Integration method</label>
+                    <source_model>Paynet\PaynetEasy\Model\Config\PaymentOptions</source_model>
+                    <validate>validate-select</validate>
+                    <comment>Select integration method (Direct or Form)</comment>
+                </field>
+                <!-- Основные настройки -->
+            </group>
+        </section>
+    </system>
+</config>

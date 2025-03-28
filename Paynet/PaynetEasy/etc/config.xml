@@ -1,0 +1,28 @@
+<?xml version="1.0"?>
+<config xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="urn:magento:framework:Config/etc/config.xsd">
+    <default>
+        <payment>
+            <paynet_payneteasy>
+                <active>1</active>
+                <model>Paynet\PaynetEasy\Model\PaynetEasy</model>
+                <title>Payment system PAYNET</title>
+                <instructions>Credit Card Payment</instructions>
+                <payment_payneteasy_live_url>https://gate.payneteasy.com/</payment_payneteasy_live_url>
+                <payment_payneteasy_sandbox_url>https://sandbox.payneteasy.com/</payment_payneteasy_sandbox_url>
+                <payment_payneteasy_three_d_secure>0</payment_payneteasy_three_d_secure>
+                <payment_payneteasy_endpoint_id></payment_payneteasy_endpoint_id>
+                <payment_payneteasy_control_key></payment_payneteasy_control_key>
+                <payment_payneteasy_test_mode>0</payment_payneteasy_test_mode>
+                <payment_payneteasy_merchant_login></payment_payneteasy_merchant_login>
+                <debug>0</debug>
+                <payment_payneteasy_logging>1</payment_payneteasy_logging>
+                <order_status>pending</order_status>
+                <sort_order>1</sort_order>
+                <is_gateway>1</is_gateway>
+                <can_use_checkout>1</can_use_checkout>
+                <allowspecific>0</allowspecific>
+                <group>online</group>
+            </paynet_payneteasy>
+        </payment>
+    </default>
+</config>

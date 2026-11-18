@@ -117,12 +117,13 @@ class StatusChange implements ObserverInterface
             $payment = $order->getPayment();
             $payneteasy = $payment->getMethodInstance();
 
-            if($order->getState() == $payment_payneteasy_cancel_status && $payneteasy->getCode() == PaynetEasy::PAYMENT_METHOD_PAYNETEASY_CODE) {
+            if($order->getState() == $payment_payneteasy_cancel_status && $payneteasy->getCode() == PaynetEasy::PAYMENT_METHOD_PAYNETEASY_CODE
+                && !$payment->getAdditionalInformation('payneteasy_return_sent')) {
 
                 $_resources = \Magento\Framework\App\ObjectManager::getInstance()
                     ->get('Magento\Framework\App\ResourceConnection');
                 $connection= $_resources->getConnection();
-                $paynet_order_id = $connection->fetchAll('SELECT paynet_order_id FROM payneteasy_payments WHERE merchant_order_id = ' . $order->getId());
+                $paynet_order_id = $connection->fetchAll('SELECT paynet_order_id FROM payneteasy_payments WHERE merchant_order_id = ?', [(int) $order->getId()]);
 
                 $data = [
                     'login' => $payment_payneteasy_merchant_login,
@@ -141,6 +142,10 @@ class StatusChange implements ObserverInterface
                     $payment_payneteasy_endpoint_id
                 );
                 
+                // Send the return request once per order, not on every save.
+                $payment->setAdditionalInformation('payneteasy_return_sent', 1);
+                $payment->save();
+
                 $this->paynetEasyLogger->log($this, 'debug', __FUNCTION__ . ' > ', [
                     'arguments' => [
                         'orderId' => $order->getId(),

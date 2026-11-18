@@ -153,15 +153,22 @@ class HandleResponse extends Action
                     PaynetEasy::PAYMENT_METHOD_PAYNETEASY_XML_PATH . 'payment_payneteasy_transaction_end_status',
                     ScopeConfigInterface::SCOPE_TYPE_DEFAULT
                 );
-                // Установка оплаченной суммы и статуса заказа
-                $order->setTotalPaid($order->getGrandTotal());
-                $order->setBaseTotalPaid($order->getBaseGrandTotal());
-                $order->setState(Order::STATE_COMPLETE)
-                    ->setStatus($endStatus);
+                // Mark the order paid once: a repeated return or callback, or an
+                // order already closed or canceled, is left unchanged.
+                $alreadyPaid = (float) $order->getTotalPaid() >= (float) $order->getGrandTotal() - 0.0001;
+                $finalState = in_array($order->getState(), [Order::STATE_COMPLETE, Order::STATE_CLOSED, Order::STATE_CANCELED], true);
 
-                $this->createTransaction($order, $payment);
+                if (!$alreadyPaid && !$finalState) {
+                    // Установка оплаченной суммы и статуса заказа
+                    $order->setTotalPaid($order->getGrandTotal());
+                    $order->setBaseTotalPaid($order->getBaseGrandTotal());
+                    $order->setState(Order::STATE_COMPLETE)
+                        ->setStatus($endStatus);
 
-                $this->orderRepository->save($order);
+                    $this->createTransaction($order, $payment);
+
+                    $this->orderRepository->save($order);
+                }
 
                 $this->messageManager->addSuccessMessage(__('Payment was successful.') . ' Order # ' . $order->getIncrementId());
 

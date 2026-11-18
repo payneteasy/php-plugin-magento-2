@@ -493,7 +493,7 @@ class PaynetEasy extends AbstractMethod
      * @param CartInterface|null $quote Cart quote object
      * @return bool Returns true if the payment method is active, otherwise false.
      */
-    public function isAvailable(CartInterface $quote = null): bool
+    public function isAvailable(?CartInterface $quote = null): bool
     {
         if (!$this->isActive($quote ? $quote->getStoreId() : null)) {
             return false;

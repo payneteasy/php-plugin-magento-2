@@ -12,7 +12,10 @@ use Exception,
     Magento\Sales\Model\Order\Payment\Transaction,
     Magento\Sales\Model\Order,
     Paynet\PaynetEasy\Model\PaynetEasy,
-    Paynet\PaynetEasy\Helper\PaynetEasyLogger;
+    Paynet\PaynetEasy\Helper\PaynetEasyLogger,
+    Magento\Framework\App\CsrfAwareActionInterface,
+    Magento\Framework\App\Request\InvalidRequestException,
+    Magento\Framework\App\RequestInterface;
 
 
 /**
@@ -26,8 +29,23 @@ use Exception,
  *
  * @package Paynet\PaynetEasy\Controller\Payment
  */
-class HandleResponse extends Action
+class HandleResponse extends Action implements CsrfAwareActionInterface
 {
+    /**
+     * The gateway returns the customer with a POST from its own site, which has
+     * no form key. The request data is not trusted: the payment status is
+     * always requested from the gateway.
+     */
+    public function createCsrfValidationException(RequestInterface $request): ?InvalidRequestException
+    {
+        return null;
+    }
+
+    public function validateForCsrf(RequestInterface $request): ?bool
+    {
+        return true;
+    }
+
 
     /**
      * @var ScopeConfigInterface

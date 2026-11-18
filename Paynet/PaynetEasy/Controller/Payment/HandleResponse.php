@@ -218,7 +218,7 @@ class HandleResponse extends Action
             ->setOrder($order)
             ->setTransactionId($order->getIncrementId())
             ->setAdditionalInformation(
-                [Transaction::RAW_DETAILS => (array)$payment->getAdditionalInformation()]
+                [Transaction::RAW_DETAILS => ['method' => $payment->getMethod()]]
             )
             ->setFailSafe(true)
             ->build(Transaction::TYPE_CAPTURE);

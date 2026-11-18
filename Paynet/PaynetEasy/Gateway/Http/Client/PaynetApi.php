@@ -52,8 +52,11 @@ class PaynetApi extends Api
         (
             CURLOPT_HEADER         => 0,
             CURLOPT_USERAGENT      => 'Payneteasy-Client/1.0',
-            CURLOPT_SSL_VERIFYHOST => 0,
-            CURLOPT_SSL_VERIFYPEER => 0,
+            CURLOPT_SSL_VERIFYHOST => 2,
+            CURLOPT_SSL_VERIFYPEER => true,
+            CURLOPT_PROTOCOLS      => CURLPROTO_HTTPS,
+            CURLOPT_CONNECTTIMEOUT => 10,
+            CURLOPT_TIMEOUT        => 60,
             CURLOPT_POST           => 1,
             CURLOPT_RETURNTRANSFER => 1
         ));
@@ -89,7 +92,10 @@ class PaynetApi extends Api
 
         parse_str($response, $responseFields);
 
-        return $responseFields;
+        // The gateway separates fields with "\n&", so every value ends with a line break
+        return array_map(function ($value) {
+            return is_string($value) ? trim($value) : $value;
+        }, $responseFields);
 
     }
 

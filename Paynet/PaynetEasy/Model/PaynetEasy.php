@@ -280,6 +280,8 @@ class PaynetEasy extends AbstractMethod
                 'expire_year' => $expire_year?:'',
                 'cvv2' => $cvv2?:'',
             ];
+            // The card data is needed only for this request: remove it from the order payment.
+            $this->forgetCardData($payment);
         } else {
             $card_data = [
                 'credit_card_number' => '',
@@ -491,7 +493,7 @@ class PaynetEasy extends AbstractMethod
      * @param CartInterface|null $quote Cart quote object
      * @return bool Returns true if the payment method is active, otherwise false.
      */
-    public function isAvailable(CartInterface $quote = null): bool
+    public function isAvailable(?CartInterface $quote = null): bool
     {
         if (!$this->isActive($quote ? $quote->getStoreId() : null)) {
             return false;
@@ -519,6 +521,22 @@ class PaynetEasy extends AbstractMethod
     public function isTestMode()
     {
         return $this->getConfigData('payment_payneteasy_test_mode');
+    }
+
+    /**
+     * Removes card fields saved with the order payment.
+     *
+     * @param \Magento\Payment\Model\InfoInterface $payment
+     * @return void
+     */
+    private function forgetCardData($payment)
+    {
+        $additionalData = (array) $payment->getAdditionalInformation('additional_data');
+        foreach (['credit_card_number', 'card_printed_name', 'expire_month', 'expire_year', 'cvv2'] as $key) {
+            unset($additionalData[$key]);
+        }
+        $payment->setAdditionalInformation('additional_data', $additionalData);
+        $payment->save();
     }
 
     public function assignData(\Magento\Framework\DataObject $data)

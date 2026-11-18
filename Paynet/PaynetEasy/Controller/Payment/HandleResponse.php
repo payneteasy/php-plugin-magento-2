@@ -12,7 +12,10 @@ use Exception,
     Magento\Sales\Model\Order\Payment\Transaction,
     Magento\Sales\Model\Order,
     Paynet\PaynetEasy\Model\PaynetEasy,
-    Paynet\PaynetEasy\Helper\PaynetEasyLogger;
+    Paynet\PaynetEasy\Helper\PaynetEasyLogger,
+    Magento\Framework\App\CsrfAwareActionInterface,
+    Magento\Framework\App\Request\InvalidRequestException,
+    Magento\Framework\App\RequestInterface;
 
 
 /**
@@ -26,8 +29,23 @@ use Exception,
  *
  * @package Paynet\PaynetEasy\Controller\Payment
  */
-class HandleResponse extends Action
+class HandleResponse extends Action implements CsrfAwareActionInterface
 {
+    /**
+     * The gateway returns the customer with a POST from its own site, which has
+     * no form key. The request data is not trusted: the payment status is
+     * always requested from the gateway.
+     */
+    public function createCsrfValidationException(RequestInterface $request): ?InvalidRequestException
+    {
+        return null;
+    }
+
+    public function validateForCsrf(RequestInterface $request): ?bool
+    {
+        return true;
+    }
+
 
     /**
      * @var ScopeConfigInterface
@@ -153,15 +171,22 @@ class HandleResponse extends Action
                     PaynetEasy::PAYMENT_METHOD_PAYNETEASY_XML_PATH . 'payment_payneteasy_transaction_end_status',
                     ScopeConfigInterface::SCOPE_TYPE_DEFAULT
                 );
-                // Установка оплаченной суммы и статуса заказа
-                $order->setTotalPaid($order->getGrandTotal());
-                $order->setBaseTotalPaid($order->getBaseGrandTotal());
-                $order->setState(Order::STATE_COMPLETE)
-                    ->setStatus($endStatus);
+                // Mark the order paid once: a repeated return or callback, or an
+                // order already closed or canceled, is left unchanged.
+                $alreadyPaid = (float) $order->getTotalPaid() >= (float) $order->getGrandTotal() - 0.0001;
+                $finalState = in_array($order->getState(), [Order::STATE_COMPLETE, Order::STATE_CLOSED, Order::STATE_CANCELED], true);
 
-                $this->createTransaction($order, $payment);
+                if (!$alreadyPaid && !$finalState) {
+                    // Установка оплаченной суммы и статуса заказа
+                    $order->setTotalPaid($order->getGrandTotal());
+                    $order->setBaseTotalPaid($order->getBaseGrandTotal());
+                    $order->setState(Order::STATE_COMPLETE)
+                        ->setStatus($endStatus);
 
-                $this->orderRepository->save($order);
+                    $this->createTransaction($order, $payment);
+
+                    $this->orderRepository->save($order);
+                }
 
                 $this->messageManager->addSuccessMessage(__('Payment was successful.') . ' Order # ' . $order->getIncrementId());
 
@@ -218,7 +243,7 @@ class HandleResponse extends Action
             ->setOrder($order)
             ->setTransactionId($order->getIncrementId())
             ->setAdditionalInformation(
-                [Transaction::RAW_DETAILS => (array)$payment->getAdditionalInformation()]
+                [Transaction::RAW_DETAILS => ['method' => $payment->getMethod()]]
             )
             ->setFailSafe(true)
             ->build(Transaction::TYPE_CAPTURE);

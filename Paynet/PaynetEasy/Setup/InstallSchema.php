@@ -32,9 +32,9 @@ class InstallSchema implements InstallSchemaInterface
                 )
                 ->addColumn(
                     'paynet_order_id',
-                    Table::TYPE_INTEGER,
+                    Table::TYPE_BIGINT,
                     null,
-                    ['nullable' => false],
+                    ['unsigned' => true, 'nullable' => false],
                     'PaynetOrderId'
                 )
                 ->addColumn(

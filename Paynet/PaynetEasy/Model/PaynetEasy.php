@@ -252,46 +252,17 @@ class PaynetEasy extends AbstractMethod
         $payment = $order->getPayment();
         $additionalInformation = $payment->getAdditionalInformation();
 
+        $card_data = $this->takeCardData();
+
+        // Orders placed with an earlier version may still have card fields saved
         if (isset($additionalInformation['additional_data'])) {
-            $credit_card_number = '';
-            if (isset($additionalInformation['additional_data']['credit_card_number'])) {
-                $credit_card_number = $additionalInformation['additional_data']['credit_card_number'];
+            foreach (self::CARD_FIELDS as $key) {
+                if ($card_data[$key] === '' && !empty($additionalInformation['additional_data'][$key])) {
+                    $card_data[$key] = (string)$additionalInformation['additional_data'][$key];
+                }
             }
-            $card_printed_name = '';
-            if (isset($additionalInformation['additional_data']['card_printed_name'])) {
-                $card_printed_name = $additionalInformation['additional_data']['card_printed_name'];
-            }
-            $expire_month = '';
-            if (isset($additionalInformation['additional_data']['expire_month'])) {
-                $expire_month = $additionalInformation['additional_data']['expire_month'];
-            }
-            $expire_year = '';
-            if (isset($additionalInformation['additional_data']['expire_year'])) {
-                $expire_year = $additionalInformation['additional_data']['expire_year'];
-            }
-            $cvv2 = '';
-            if (isset($additionalInformation['additional_data']['cvv2'])) {
-                $cvv2 = $additionalInformation['additional_data']['cvv2'];
-            }
-            $card_data = [
-                'credit_card_number' => $credit_card_number?:'',
-                'card_printed_name' => $card_printed_name?:'',
-                'expire_month' => $expire_month?:'',
-                'expire_year' => $expire_year?:'',
-                'cvv2' => $cvv2?:'',
-            ];
-            // The card data is needed only for this request: remove it from the order payment.
             $this->forgetCardData($payment);
-        } else {
-            $card_data = [
-                'credit_card_number' => '',
-                'card_printed_name' => '',
-                'expire_month' => '',
-                'expire_year' => '',
-                'cvv2' => '',
-            ];
         }
-            
 
         $data = [
             'client_orderid' => (string)$orderId,
@@ -532,18 +503,60 @@ class PaynetEasy extends AbstractMethod
     private function forgetCardData($payment)
     {
         $additionalData = (array) $payment->getAdditionalInformation('additional_data');
-        foreach (['credit_card_number', 'card_printed_name', 'expire_month', 'expire_year', 'cvv2'] as $key) {
+        foreach (self::CARD_FIELDS as $key) {
             unset($additionalData[$key]);
         }
         $payment->setAdditionalInformation('additional_data', $additionalData);
         $payment->save();
     }
 
+    /**
+     * Card fields of the checkout form
+     */
+    const CARD_FIELDS = ['credit_card_number', 'card_printed_name', 'expire_month', 'expire_year', 'cvv2'];
+
     public function assignData(\Magento\Framework\DataObject $data)
     {
         parent::assignData($data);
-        $this->getInfoInstance()->setAdditionalInformation($data->getData());
+
+        $info = $data->getData();
+
+        // The card data is not saved with the payment: it is kept in the checkout
+        // session only until the sale request is sent to the gateway.
+        $card_data = [];
+        if (isset($info['additional_data']) && is_array($info['additional_data'])) {
+            foreach (self::CARD_FIELDS as $key) {
+                if (array_key_exists($key, $info['additional_data'])) {
+                    $card_data[$key] = (string)$info['additional_data'][$key];
+                    unset($info['additional_data'][$key]);
+                }
+            }
+        }
+
+        if ($card_data) {
+            $this->_checkoutSession->setPaynetEasyCardData($card_data);
+        }
+
+        $this->getInfoInstance()->setAdditionalInformation($info);
 
         return $this;
+    }
+
+    /**
+     * Takes the card data from the checkout session and removes it there.
+     *
+     * @return array
+     */
+    private function takeCardData()
+    {
+        $card_data = (array)$this->_checkoutSession->getPaynetEasyCardData();
+        $this->_checkoutSession->unsPaynetEasyCardData();
+
+        $result = [];
+        foreach (self::CARD_FIELDS as $key) {
+            $result[$key] = isset($card_data[$key]) ? (string)$card_data[$key] : '';
+        }
+
+        return $result;
     }
 }

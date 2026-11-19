@@ -123,28 +123,77 @@ class StatusChange implements ObserverInterface
                 $_resources = \Magento\Framework\App\ObjectManager::getInstance()
                     ->get('Magento\Framework\App\ResourceConnection');
                 $connection= $_resources->getConnection();
-                $paynet_order_id = $connection->fetchAll('SELECT paynet_order_id FROM payneteasy_payments WHERE merchant_order_id = ?', [(int) $order->getId()]);
+                $paynet_order_id = (string) $connection->fetchOne('SELECT paynet_order_id FROM payneteasy_payments WHERE merchant_order_id = ? ORDER BY id DESC LIMIT 1', [(int) $order->getId()]);
+
+                // Refund what the customer paid, in the order currency (as charged)
+                $amount = (float) $order->getTotalPaid() - (float) $order->getTotalRefunded();
+                if ($paynet_order_id === '' || $amount <= 0) {
+                    return;
+                }
 
                 $data = [
                     'login' => $payment_payneteasy_merchant_login,
-                    'client_orderid' => $order->getId(),
-                    'orderid' => $paynet_order_id[0]['paynet_order_id'],
-                    'comment' => 'Order cancel '
+                    'client_orderid' => (string) $order->getId(),
+                    'orderid' => $paynet_order_id,
+                    'amount' => number_format($amount, 2, '.', ''),
+                    'currency' => (string) $order->getOrderCurrencyCode(),
+                    'comment' => 'Order cancel'
                 ];
 
-                $data['control'] = $this->signPaymentRequest($data, $payment_payneteasy_endpoint_id, $payment_payneteasy_control_key);
+                $data['control'] = $this->signReturnRequest($data, $payment_payneteasy_merchant_login, $payment_payneteasy_control_key);
 
-                $responceReturn = $this->paynetApi->return(
-                    $data,
-                    $payment_payneteasy_payment_method,
-                    $payment_payneteasy_test_mode,
-                    $action_url,
-                    $payment_payneteasy_endpoint_id
-                );
-                
                 // Send the return request once per order, not on every save.
                 $payment->setAdditionalInformation('payneteasy_return_sent', 1);
                 $payment->save();
+
+                try {
+                    $responceReturn = $this->paynetApi->return(
+                        $data,
+                        $payment_payneteasy_payment_method,
+                        $payment_payneteasy_test_mode,
+                        $action_url,
+                        $payment_payneteasy_endpoint_id
+                    );
+                } catch (\Throwable $e) {
+                    $responceReturn = ['type' => 'error', 'error-message' => $e->getMessage()];
+                }
+
+                $refused = in_array(trim((string) ($responceReturn['type'] ?? '')), ['error', 'validation-error'], true)
+                    || trim((string) ($responceReturn['status'] ?? '')) === 'error';
+
+                if (!$refused) {
+                    // The refund is processed asynchronously: wait briefly for the final answer
+                    for ($i = 0; $i < 5; $i++) {
+                        $statusData = [
+                            'login' => $payment_payneteasy_merchant_login,
+                            'client_orderid' => (string) $order->getId(),
+                            'orderid' => $paynet_order_id,
+                        ];
+                        $statusData['control'] = $this->signString($statusData['login'] . $statusData['client_orderid'] . $statusData['orderid'], $payment_payneteasy_control_key);
+                        try {
+                            $state = $this->paynetApi->status($statusData, $payment_payneteasy_payment_method, $payment_payneteasy_test_mode, $action_url, $payment_payneteasy_endpoint_id);
+                        } catch (\Throwable $e) {
+                            break;
+                        }
+                        $final = trim((string) ($state['status'] ?? ''));
+                        if (in_array($final, ['declined', 'error', 'filtered'], true)) {
+                            $refused = true;
+                            $responceReturn = $state;
+                            break;
+                        }
+                        if ($final !== 'processing') {
+                            break;
+                        }
+                        sleep(1);
+                    }
+                }
+
+                // Tell the merchant what happened to the money
+                // (saved on its own: the order itself is being saved right now)
+                $order->addCommentToStatusHistory($refused
+                    ? __('PaynetEasy refused the refund of %1 %2: %3', $data['amount'], $data['currency'], trim((string) ($responceReturn['error-message'] ?? 'unknown error')))
+                    : __('PaynetEasy refund of %1 %2 requested.', $data['amount'], $data['currency']))
+                    ->save();
 
                 $this->paynetEasyLogger->log($this, 'debug', __FUNCTION__ . ' > ', [
                     'arguments' => [
@@ -159,6 +208,14 @@ class StatusChange implements ObserverInterface
     private function signString($s, $merchantControl)
     {
         return sha1($s . $merchantControl);
+    }
+
+    private function signReturnRequest($requestFields, $login, $merchantControl)
+    {
+        return $this->signString(
+            $login . $requestFields['client_orderid'] . $requestFields['orderid'] . (int) round($requestFields['amount'] * 100) . $requestFields['currency'],
+            $merchantControl
+        );
     }
 
     private function signPaymentRequest($requestFields, $endpointId, $merchantControl)

@@ -515,6 +515,20 @@ class PaynetEasy extends AbstractMethod
      */
     const CARD_FIELDS = ['credit_card_number', 'card_printed_name', 'expire_month', 'expire_year', 'cvv2'];
 
+    /**
+     * Seconds the card data may wait in the checkout session for the sale request
+     */
+    const CARD_TTL = 900;
+
+    /**
+     * @return \Magento\Framework\Encryption\EncryptorInterface
+     */
+    private function getEncryptor()
+    {
+        return \Magento\Framework\App\ObjectManager::getInstance()
+            ->get(\Magento\Framework\Encryption\EncryptorInterface::class);
+    }
+
     public function assignData(\Magento\Framework\DataObject $data)
     {
         parent::assignData($data);
@@ -534,7 +548,11 @@ class PaynetEasy extends AbstractMethod
         }
 
         if ($card_data) {
-            $this->_checkoutSession->setPaynetEasyCardData($card_data);
+            // Encrypted and short-lived: an abandoned checkout does not keep a usable card
+            $this->_checkoutSession->setPaynetEasyCardData([
+                'data' => $this->getEncryptor()->encrypt(json_encode($card_data)),
+                'expires' => time() + self::CARD_TTL,
+            ]);
         }
 
         $this->getInfoInstance()->setAdditionalInformation($info);
@@ -549,8 +567,13 @@ class PaynetEasy extends AbstractMethod
      */
     private function takeCardData()
     {
-        $card_data = (array)$this->_checkoutSession->getPaynetEasyCardData();
+        $stored = (array)$this->_checkoutSession->getPaynetEasyCardData();
         $this->_checkoutSession->unsPaynetEasyCardData();
+
+        $card_data = [];
+        if (isset($stored['data'], $stored['expires']) && (int)$stored['expires'] >= time()) {
+            $card_data = (array)json_decode((string)$this->getEncryptor()->decrypt((string)$stored['data']), true);
+        }
 
         $result = [];
         foreach (self::CARD_FIELDS as $key) {

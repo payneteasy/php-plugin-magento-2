@@ -80,12 +80,12 @@ class PaynetApi extends Api
 
         if (!empty($error_message))
         {
-            throw new \PrestaShopException($error_message, $error_code);
+            throw new \RuntimeException($error_message, $error_code);
         }
 
         if(empty($response))
         {
-            throw new \PrestaShopException('Host response is empty');
+            throw new \RuntimeException('Host response is empty');
         }
 
         $responseFields = array();
@@ -121,7 +121,7 @@ class PaynetApi extends Api
         $result = json_encode($data);
         $error = json_last_error();
         if ($error != JSON_ERROR_NONE) {
-            throw new \PrestaShopException('JSON Error: ' . json_last_error_msg());
+            throw new \RuntimeException('JSON Error: ' . json_last_error_msg());
         }
         return $result;
     }

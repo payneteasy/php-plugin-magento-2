@@ -10,6 +10,7 @@ use Exception,
     Magento\Framework\Message\ManagerInterface,
     Magento\Sales\Api\OrderRepositoryInterface,
     Magento\Sales\Model\Order,
+    Paynet\PaynetEasy\Model\PaynetEasy,
     Paynet\PaynetEasy\Helper\PaynetEasyLogger;
 
 
@@ -98,10 +99,19 @@ class Redirect extends Action
         $order = $session->getLastRealOrder();
         $orderId = $order->getId();
 
+        // Start a payment only for an unpaid order of this method that waits
+        // for payment: a repeated request must not reopen a paid or canceled order.
+        if (empty($orderId)
+            || !in_array($order->getState(), [Order::STATE_NEW, Order::STATE_PENDING_PAYMENT], true)
+            || (float) $order->getTotalPaid() > 0
+            || $order->getPayment()->getMethod() !== PaynetEasy::PAYMENT_METHOD_PAYNETEASY_CODE
+        ) {
+            return $this->jsonFactory->create()->setData([
+                'url' => $this->_url->getUrl('checkout/cart'),
+            ]);
+        }
+
         try {
-            if (empty($orderId)) {
-                throw new LocalizedException(__('This order does not exist.'));
-            }
 
             /**
              * @var PaynetEasy

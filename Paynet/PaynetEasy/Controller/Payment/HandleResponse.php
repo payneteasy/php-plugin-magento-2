@@ -7,6 +7,7 @@ use Exception,
     Magento\Framework\App\Config\ScopeConfigInterface,
     Magento\Sales\Model\Order\Payment\Transaction\BuilderInterface as TransactionBuilder,
     Magento\Customer\Model\Session as CustomerSession,
+    Magento\Checkout\Model\Session as CheckoutSession,
     Magento\Sales\Api\OrderRepositoryInterface,
     Magento\Framework\Exception\LocalizedException,
     Magento\Sales\Model\Order\Payment\Transaction,
@@ -71,6 +72,11 @@ class HandleResponse extends Action implements CsrfAwareActionInterface
      * @var PaynetEasyLogger
      */
     protected $paynetEasyLogger;
+
+    /**
+     * @var CheckoutSession
+     */
+    protected $checkoutSession;
     
 
     /**
@@ -89,7 +95,8 @@ class HandleResponse extends Action implements CsrfAwareActionInterface
         TransactionBuilder $transactionBuilder,
         OrderRepositoryInterface $orderRepository,
         CustomerSession $customerSession,
-        PaynetEasyLogger $paynetEasyLogger
+        PaynetEasyLogger $paynetEasyLogger,
+        CheckoutSession $checkoutSession
     ) {
         parent::__construct($context);
         
@@ -97,6 +104,7 @@ class HandleResponse extends Action implements CsrfAwareActionInterface
         $this->transactionBuilder = $transactionBuilder;
         $this->orderRepository = $orderRepository;
         $this->customerSession = $customerSession;
+        $this->checkoutSession = $checkoutSession;
         $this->paynetEasyLogger = $paynetEasyLogger;
     }
 
@@ -165,6 +173,7 @@ class HandleResponse extends Action implements CsrfAwareActionInterface
             }
 
             if (trim($response['status']) == 'declined' || trim($response['status']) == 'error') {
+                $this->cancelDeclinedOrder($order);
                 throw new LocalizedException(__('Payment status is not Approved.'));
             } elseif (trim($response['status']) == 'approved'){
                 $endStatus = $this->scopeConfig->getValue(
@@ -225,6 +234,33 @@ class HandleResponse extends Action implements CsrfAwareActionInterface
             $resultRedirect = false;
         }
         return $resultRedirect;
+    }
+
+
+    /**
+     * Cancels an unpaid order after a final decline and returns its items to
+     * the cart, so that the customer can pay again with a new order.
+     *
+     * @param Order $order
+     *
+     * @return void
+     */
+    private function cancelDeclinedOrder($order)
+    {
+        if ($order->getState() !== Order::STATE_PENDING_PAYMENT || (float) $order->getTotalPaid() > 0) {
+            return;
+        }
+
+        if ($order->canCancel()) {
+            $order->cancel();
+            $order->addCommentToStatusHistory(__('PaynetEasy: payment declined.'));
+            $this->orderRepository->save($order);
+        }
+
+        $lastOrder = $this->checkoutSession->getLastRealOrder();
+        if ($lastOrder && $lastOrder->getId() == $order->getId()) {
+            $this->checkoutSession->restoreQuote();
+        }
     }
 
 

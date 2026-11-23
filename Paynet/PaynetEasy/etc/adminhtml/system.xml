@@ -4,7 +4,7 @@
         <section id="payment">
             <group id="paynet_payneteasy" translate="label" sortOrder="1" showInDefault="1" showInWebsite="1" showInStore="1">
                 <label>Payment system PAYNET</label>
-                <!-- Основные настройки -->
+                <!-- Main settings -->
                 <field id="active" translate="label" type="select" sortOrder="1" showInDefault="1" showInWebsite="1" showInStore="0" canRestore="1">
                     <label>Enable Payment system PAYNET</label>
                     <source_model>Magento\Config\Model\Config\Source\Yesno</source_model>
@@ -71,7 +71,7 @@
                     <validate>validate-select</validate>
                     <comment>Select integration method (Direct or Form)</comment>
                 </field>
-                <!-- Основные настройки -->
+                <!-- Main settings -->
             </group>
         </section>
     </system>

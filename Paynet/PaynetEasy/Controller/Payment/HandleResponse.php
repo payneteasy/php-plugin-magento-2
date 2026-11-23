@@ -186,7 +186,7 @@ class HandleResponse extends Action implements CsrfAwareActionInterface
                 $finalState = in_array($order->getState(), [Order::STATE_COMPLETE, Order::STATE_CLOSED, Order::STATE_CANCELED], true);
 
                 if (!$alreadyPaid && !$finalState) {
-                    // Установка оплаченной суммы и статуса заказа
+                    // Set the paid amount and the order status
                     $order->setTotalPaid($order->getGrandTotal());
                     $order->setBaseTotalPaid($order->getBaseGrandTotal());
                     $order->setState(Order::STATE_COMPLETE)

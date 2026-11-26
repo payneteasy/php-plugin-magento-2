@@ -123,7 +123,12 @@ class StatusChange implements ObserverInterface
                 $_resources = \Magento\Framework\App\ObjectManager::getInstance()
                     ->get('Magento\Framework\App\ResourceConnection');
                 $connection= $_resources->getConnection();
-                $paynet_order_id = (string) $connection->fetchOne('SELECT paynet_order_id FROM payneteasy_payments WHERE merchant_order_id = ? ORDER BY id DESC LIMIT 1', [(int) $order->getId()]);
+                // The refund goes to the attempt the order was paid with;
+                // orders paid before this was remembered use their latest attempt
+                $paynet_order_id = (string) $payment->getAdditionalInformation('payneteasy_paid_order_id');
+                if ($paynet_order_id === '') {
+                    $paynet_order_id = (string) $connection->fetchOne('SELECT paynet_order_id FROM payneteasy_payments WHERE merchant_order_id = ? ORDER BY id DESC LIMIT 1', [(int) $order->getId()]);
+                }
 
                 // Refund what the customer paid, in the order currency (as charged)
                 $amount = (float) $order->getTotalPaid() - (float) $order->getTotalRefunded();

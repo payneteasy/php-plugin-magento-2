@@ -13,7 +13,9 @@ use Exception,
     Magento\Sales\Model\Order\Payment\Transaction,
     Magento\Sales\Model\Order,
     Paynet\PaynetEasy\Model\PaynetEasy,
+    Paynet\PaynetEasy\Model\OrderLock,
     Paynet\PaynetEasy\Helper\PaynetEasyLogger,
+    Magento\Framework\Controller\ResultFactory,
     Magento\Framework\App\CsrfAwareActionInterface,
     Magento\Framework\App\Request\InvalidRequestException,
     Magento\Framework\App\RequestInterface;
@@ -125,12 +127,23 @@ class HandleResponse extends Action implements CsrfAwareActionInterface
         if (!$orderId)
             $orderId = $this->getRequest()->getParam('client_orderid');
 
+        // The result is shown only to the customer of the order. Anyone else
+        // (the gateway callback too) gets the same answer for every order.
+        $isCustomer = false;
+        $result = null;
 
+        $orderLock = $this->_objectManager->get(OrderLock::class);
+        $locked = false;
 
         try {
-            if (empty($orderId)) {
+            if (empty($orderId) || !is_scalar($orderId) || !ctype_digit((string) $orderId)) {
+                $orderId = '';
                 throw new LocalizedException(__('Order ID not found.'));
             }
+
+            // The customer return and the callback may come together:
+            // they are handled one after another
+            $locked = $orderLock->lock($orderId);
 
             // Load the order
             $order = $this->orderRepository->get($orderId);
@@ -147,42 +160,54 @@ class HandleResponse extends Action implements CsrfAwareActionInterface
                 throw new LocalizedException(__('Unknown payment method.'));
             }
 
-            $response = $payneteasy->getPaymentStatus($order);
+            $isCustomer = $this->isCustomerOfOrder($order, $payneteasy);
+
+            $alreadyPaid = (float) $order->getTotalPaid() >= (float) $order->getGrandTotal() - 0.0001;
+
+            if ($alreadyPaid) {
+                // A paid order needs no request to the gateway
+                $response = ['status' => 'approved'];
+            } elseif ($payment->getAdditionalInformation('payneteasy_paid_after_cancel')) {
+                throw new LocalizedException(__('The order was canceled before the payment was received. Please contact the store.'));
+            } elseif (!$locked || !$orderLock->allowStatusRequest($orderId)) {
+                // Too many requests for this order: the gateway is asked later
+                $response = ['status' => 'processing'];
+            } else {
+                $response = $payneteasy->getPaymentStatus($order);
+            }
+
+            $status = trim((string) $response['status']);
 
             $this->paynetEasyLogger->log($this, 'debug', __FUNCTION__ . ' > execute', [
                 'arguments' => [
                     'orderId' => $orderId,
-                    'status' => $response['status']
+                    'status' => $status
                 ],
             ]);
 
-            $payment_payneteasy_three_d_secure = $this->scopeConfig->getValue(
-                PaynetEasy::PAYMENT_METHOD_PAYNETEASY_XML_PATH . 'payment_payneteasy_three_d_secure',
-                ScopeConfigInterface::SCOPE_TYPE_DEFAULT
-            );
-
-            if ($payment_payneteasy_three_d_secure == true) {
-                $this->paynetEasyLogger->log($this, 'debug', __FUNCTION__ . ' > execute', [
-                    'arguments' => [
-                        'orderId' => $orderId,
-                        '$response' => json_encode($response)
-                    ],
-                ]);
-                if (isset($response['html']))
-                echo $response['html'];
-            }
-
-            if (trim($response['status']) == 'declined' || trim($response['status']) == 'error') {
+            if (in_array($status, ['declined', 'error', 'filtered'], true)) {
                 $this->cancelDeclinedOrder($order);
                 throw new LocalizedException(__('Payment status is not Approved.'));
-            } elseif (trim($response['status']) == 'approved'){
+            } elseif ($status == 'approved') {
+                if (!$alreadyPaid && $order->getState() === Order::STATE_CANCELED) {
+                    // The money was taken for an order that is canceled already:
+                    // the merchant is told once, the customer sees no success
+                    $payment->setAdditionalInformation('payneteasy_paid_after_cancel', 1);
+                    $payment->save();
+                    $order->addCommentToStatusHistory(__(
+                        'PaynetEasy: the payment %1 was approved after the order had been canceled. The order is not marked as paid: check the payment and refund it.',
+                        (string) ($response['attempt-paynet-order-id'] ?? '')
+                    ))->save();
+
+                    throw new LocalizedException(__('The order was canceled before the payment was received. Please contact the store.'));
+                }
+
                 $endStatus = $this->scopeConfig->getValue(
                     PaynetEasy::PAYMENT_METHOD_PAYNETEASY_XML_PATH . 'payment_payneteasy_transaction_end_status',
                     ScopeConfigInterface::SCOPE_TYPE_DEFAULT
                 );
                 // Mark the order paid once: a repeated return or callback, or an
-                // order already closed or canceled, is left unchanged.
-                $alreadyPaid = (float) $order->getTotalPaid() >= (float) $order->getGrandTotal() - 0.0001;
+                // order already closed, is left unchanged.
                 $finalState = in_array($order->getState(), [Order::STATE_COMPLETE, Order::STATE_CLOSED, Order::STATE_CANCELED], true);
 
                 if (!$alreadyPaid && !$finalState) {
@@ -192,21 +217,43 @@ class HandleResponse extends Action implements CsrfAwareActionInterface
                     $order->setState(Order::STATE_COMPLETE)
                         ->setStatus($endStatus);
 
+                    // The paid attempt: a refund is sent for it
+                    if (!empty($response['attempt-paynet-order-id'])) {
+                        $payment->setAdditionalInformation('payneteasy_paid_order_id', (string) $response['attempt-paynet-order-id']);
+                    }
+
                     $this->createTransaction($order, $payment);
 
                     $this->orderRepository->save($order);
                 }
 
-                $this->messageManager->addSuccessMessage(__('Payment was successful.') . ' Order # ' . $order->getIncrementId());
+                if ($isCustomer) {
+                    $this->messageManager->addSuccessMessage(__('Payment was successful.') . ' Order # ' . $order->getIncrementId());
 
-                // Redirect to the order view page
-                if ($this->customerSession->isLoggedIn()) {
-                    $pathRedirect = 'sales/order/view/order_id/' . $order->getId();
-                } else {
-                    $pathRedirect = 'sales/guest/form/';
+                    // Redirect to the order view page
+                    if ($this->customerSession->isLoggedIn()) {
+                        $pathRedirect = 'sales/order/view/order_id/' . $order->getId();
+                    } else {
+                        $pathRedirect = 'sales/guest/form/';
+                    }
+                    $result = $this->resultRedirectFactory->create();
+                    $result->setPath($pathRedirect);
                 }
-                $resultRedirect = $this->resultRedirectFactory->create();
-                $resultRedirect->setPath($pathRedirect);
+            } elseif ($isCustomer) {
+                $payment_payneteasy_three_d_secure = $this->scopeConfig->getValue(
+                    PaynetEasy::PAYMENT_METHOD_PAYNETEASY_XML_PATH . 'payment_payneteasy_three_d_secure',
+                    ScopeConfigInterface::SCOPE_TYPE_DEFAULT
+                );
+
+                if ($payment_payneteasy_three_d_secure == true && isset($response['html']) && trim((string) $response['html']) !== '') {
+                    // 3-D Secure: the page of the gateway sends the customer to the bank
+                    $result = $this->resultFactory->create(ResultFactory::TYPE_RAW);
+                    $result->setContents($response['html']);
+                } else {
+                    // The payment is not finished yet: the page asks again in a few seconds
+                    $result = $this->resultFactory->create(ResultFactory::TYPE_RAW);
+                    $result->setContents($this->getWaitPage($payneteasy->getCustomerReturnUrl($order)));
+                }
             }
         } catch (Exception | LocalizedException $e) {
 
@@ -220,20 +267,79 @@ class HandleResponse extends Action implements CsrfAwareActionInterface
                 'line_exception' => $e->getLine(),
             ]);
 
-            $this->messageManager->addErrorMessage(__('Payment failed.') . ' ' . $e->getMessage());
+            $result = null;
 
-            $pathRedirect = 'checkout/cart';
-            $resultRedirect = $this->resultRedirectFactory->create();
-            $resultRedirect->setPath($pathRedirect);
+            if ($isCustomer) {
+                // Only a message meant for the customer is shown, never a technical one
+                $this->messageManager->addErrorMessage(__('Payment failed.') . ' ' . ($e instanceof LocalizedException
+                    ? $e->getMessage()
+                    : __('Please try again later.')));
+
+                $result = $this->resultRedirectFactory->create();
+                $result->setPath('checkout/cart');
+            }
+        } finally {
+            if ($locked) {
+                $orderLock->unlock($orderId);
+            }
         }
-        $payment_payneteasy_three_d_secure = $this->scopeConfig->getValue(
-            PaynetEasy::PAYMENT_METHOD_PAYNETEASY_XML_PATH . 'payment_payneteasy_three_d_secure',
-            ScopeConfigInterface::SCOPE_TYPE_DEFAULT
-        );
-        if ($payment_payneteasy_three_d_secure) {
-            $resultRedirect = false;
+
+        if ($result === null) {
+            // Not the customer of the order: nothing about the order is told
+            $result = $this->resultRedirectFactory->create();
+            $result->setPath('');
         }
-        return $resultRedirect;
+
+        return $result;
+    }
+
+
+    /**
+     * True if the visitor is the customer of the order: he came back from the
+     * gateway with the key of the order, has just placed it in this session,
+     * or is logged in as its customer.
+     *
+     * @param Order $order
+     * @param PaynetEasy $payneteasy
+     *
+     * @return bool
+     */
+    private function isCustomerOfOrder($order, $payneteasy)
+    {
+        $key = $this->getRequest()->getParam('key');
+        if (is_string($key) && $key !== '' && hash_equals($payneteasy->getReturnKey($order), $key)) {
+            return true;
+        }
+
+        $lastOrder = $this->checkoutSession->getLastRealOrder();
+        if ($lastOrder && $lastOrder->getId() && $lastOrder->getId() == $order->getId()) {
+            return true;
+        }
+
+        return $this->customerSession->isLoggedIn()
+            && $order->getCustomerId()
+            && $order->getCustomerId() == $this->customerSession->getCustomerId();
+    }
+
+
+    /**
+     * Page for a payment that is still processing: it opens the result address again.
+     *
+     * @param string $url
+     *
+     * @return string
+     */
+    private function getWaitPage($url)
+    {
+        $url = htmlspecialchars($url, ENT_QUOTES, 'UTF-8');
+        $text = htmlspecialchars((string) __('Please wait, your payment is being processed.'), ENT_QUOTES, 'UTF-8');
+        $link = htmlspecialchars((string) __('Check the result'), ENT_QUOTES, 'UTF-8');
+
+        return '<!DOCTYPE html><html><head><meta charset="utf-8">'
+            . '<meta name="robots" content="noindex">'
+            . '<meta http-equiv="refresh" content="5;url=' . $url . '">'
+            . '<title>' . $text . '</title></head>'
+            . '<body><p>' . $text . '</p><p><a href="' . $url . '">' . $link . '</a></p></body></html>';
     }
 
 

@@ -11,7 +11,8 @@ define(
         'Magento_Checkout/js/model/full-screen-loader',
         'mage/translate',
         'mage/url',
-        'Magento_Ui/js/model/messageList'
+        'Magento_Ui/js/model/messageList',
+        'mage/cookies'
     ],
     function (
         $,
@@ -118,7 +119,8 @@ define(
              */
             afterPlaceOrder: function () {
                 fullScreenLoader.startLoader();
-                $.post(url.build('payneteasy/payment/redirect'), 'json')
+                // The payment is started only with the form key of the customer session
+                $.post(url.build('payneteasy/payment/redirect'), {form_key: $.mage.cookies.get('form_key')}, null, 'json')
                     .done(data => {
                         window.location = data.url;
                     }).fail(response => {

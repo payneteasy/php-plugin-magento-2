@@ -283,9 +283,10 @@ class PaynetEasy extends AbstractMethod
             'expire_year' => $card_data['expire_year'],
             'first_name' => $order->getCustomerFirstname(),
             'last_name'  => $order->getCustomerLastname(),
-            'redirect_success_url'      => $this->getReturnUrl() . '?orderId=' . $orderId,
-            'redirect_fail_url'      => $this->getReturnUrl() . '?orderId=' . $orderId,
-            'redirect_url' => $this->getReturnUrl() . '?orderId=' . $orderId,
+            // The customer comes back with the key of the order; the callback has none
+            'redirect_success_url'      => $this->getCustomerReturnUrl($order),
+            'redirect_fail_url'      => $this->getCustomerReturnUrl($order),
+            'redirect_url' => $this->getCustomerReturnUrl($order),
             'server_callback_url' => $this->getReturnUrl() . '?orderId=' . $orderId,
         ];
 
@@ -340,7 +341,7 @@ class PaynetEasy extends AbstractMethod
             empty($payUrl = $response['redirect-url'])
         ) {
 //            throw new LocalizedException(__('Failed to get payment URL.'));
-            return $this->getReturnUrl() . '?orderId=' . $orderId;
+            return $this->getCustomerReturnUrl($order);
         } else {
             return $response['redirect-url'];
         }
@@ -376,6 +377,58 @@ class PaynetEasy extends AbstractMethod
         return $this->_urlBuilder->getUrl('payneteasy/payment/handleResponse', ['_secure' => true]);
     }
 
+
+    /**
+     * Address of the result page for the customer of the order.
+     *
+     * @param Order $order Order object
+     * @return string Returns URL string.
+     */
+    public function getCustomerReturnUrl($order)
+    {
+        return $this->getReturnUrl() . '?orderId=' . $order->getId() . '&key=' . $this->getReturnKey($order);
+    }
+
+    /**
+     * Key that shows the payment result of the order: it is known to the
+     * customer who was sent to pay this order, and cannot be guessed by the order number.
+     *
+     * @param Order $order Order object
+     * @return string
+     */
+    public function getReturnKey($order)
+    {
+        $controlKey = (string)$this->_scopeConfig->getValue(
+            self::PAYMENT_METHOD_PAYNETEASY_XML_PATH . 'payment_payneteasy_control_key',
+            ScopeConfigInterface::SCOPE_TYPE_DEFAULT
+        );
+
+        return hash_hmac('sha256', 'return|' . $order->getId() . '|' . $order->getProtectCode(), $controlKey);
+    }
+
+    /**
+     * Gateway ids of the payment attempts of the order, newest first.
+     *
+     * @param Order $order Order object
+     * @return string[]
+     */
+    public function getPaymentAttempts($order)
+    {
+        $_resources = \Magento\Framework\App\ObjectManager::getInstance()
+            ->get('Magento\Framework\App\ResourceConnection');
+        $connection= $_resources->getConnection();
+        $tableName = $connection->getTableName('payneteasy_payments');
+
+        return array_map('strval', $connection->fetchCol(
+            'SELECT paynet_order_id FROM ' . $tableName . ' WHERE merchant_order_id = ? ORDER BY id DESC LIMIT ' . self::MAX_ATTEMPTS,
+            [(int)$order->getId()]
+        ));
+    }
+
+    /**
+     * Payment attempts of one order that are asked for their status
+     */
+    const MAX_ATTEMPTS = 5;
 
     /**
      * getPaymentStatus() method requests the payment status from the PaynetApi
@@ -419,37 +472,63 @@ class PaynetEasy extends AbstractMethod
                 ScopeConfigInterface::SCOPE_TYPE_DEFAULT
             );
 
-        $_resources = \Magento\Framework\App\ObjectManager::getInstance()
-            ->get('Magento\Framework\App\ResourceConnection');
-        $connection= $_resources->getConnection();
-        $paynet_order_id = $connection->fetchAll('SELECT paynet_order_id FROM payneteasy_payments WHERE merchant_order_id = ' . $orderId);
+        // An order may have several payment attempts. They are asked newest first:
+        // an approved attempt wins, then a processing one, otherwise the latest.
+        $latest = null;
+        $processing = null;
+        $unknown = false;
 
-        $data = [
-            'login' => $payment_payneteasy_merchant_login,
-            'client_orderid' => (string)$orderId,
-            'orderid' => $paynet_order_id[0]['paynet_order_id'],
-        ];
+        foreach ($this->getPaymentAttempts($order) as $paynet_order_id) {
+            $data = [
+                'login' => $payment_payneteasy_merchant_login,
+                'client_orderid' => (string)$orderId,
+                'orderid' => $paynet_order_id,
+            ];
 
-        $data['control'] = $this->signStatusRequest($data, $payment_payneteasy_merchant_login, $payment_payneteasy_control_key);
+            $data['control'] = $this->signStatusRequest($data, $payment_payneteasy_merchant_login, $payment_payneteasy_control_key);
 
-        $response = $this->paynetApi->status($data, $payment_payneteasy_payment_method, $payment_payneteasy_test_mode, $action_url, $payment_payneteasy_endpoint_id);
-        
-        $this->paynetEasyLogger->log($this, 'debug', __FUNCTION__ . ' > getOrderInfo', [
-            'arguments' => [
-                'orderId' => $paynet_order_id[0]['paynet_order_id'],
-                'client_orderid' => $orderId,
-                'status' => $response['status']
-            ],
-            'response' => $response
-        ]);
+            $response = $this->paynetApi->status($data, $payment_payneteasy_payment_method, $payment_payneteasy_test_mode, $action_url, $payment_payneteasy_endpoint_id);
 
-        if (
-            !isset($response['status'])
-        ) {
+            $this->paynetEasyLogger->log($this, 'debug', __FUNCTION__ . ' > getOrderInfo', [
+                'arguments' => [
+                    'orderId' => $paynet_order_id,
+                    'client_orderid' => $orderId,
+                    'status' => $response['status'] ?? ''
+                ],
+                'response' => $response
+            ]);
+
+            if (!isset($response['status'])) {
+                $unknown = true;
+                continue;
+            }
+
+            // The attempt this answer belongs to
+            $response['attempt-paynet-order-id'] = $paynet_order_id;
+
+            if (trim($response['status']) == 'approved') {
+                return $response;
+            }
+
+            if ($processing === null && trim($response['status']) == 'processing') {
+                $processing = $response;
+            }
+
+            if ($latest === null) {
+                $latest = $response;
+            }
+        }
+
+        if ($processing !== null) {
+            return $processing;
+        }
+
+        // An attempt that did not tell its status may be the paid one
+        if ($latest === null || $unknown) {
             throw new LocalizedException(__('No information about payment status.'));
         }
 
-        return $response;
+        return $latest;
     }
 
     private function signStatusRequest($requestFields, $login, $merchantControl)

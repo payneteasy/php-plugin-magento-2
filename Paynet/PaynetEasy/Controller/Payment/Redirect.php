@@ -10,7 +10,13 @@ use Exception,
     Magento\Framework\Message\ManagerInterface,
     Magento\Sales\Api\OrderRepositoryInterface,
     Magento\Sales\Model\Order,
+    Magento\Framework\App\Action\HttpPostActionInterface,
+    Magento\Framework\App\CsrfAwareActionInterface,
+    Magento\Framework\App\Request\InvalidRequestException,
+    Magento\Framework\App\RequestInterface,
+    Magento\Framework\Data\Form\FormKey\Validator as FormKeyValidator,
     Paynet\PaynetEasy\Model\PaynetEasy,
+    Paynet\PaynetEasy\Model\OrderLock,
     Paynet\PaynetEasy\Helper\PaynetEasyLogger;
 
 
@@ -25,8 +31,32 @@ use Exception,
  *
  * @package Paynet\PaynetEasy\Controller\Payment
  */
-class Redirect extends Action
+class Redirect extends Action implements HttpPostActionInterface, CsrfAwareActionInterface
 {
+    /**
+     * The request starts a payment for the last order of the customer session.
+     * A form key sent with it must be valid. A request without a form key is
+     * still accepted: a shop may serve the previous version of the checkout
+     * script from its static files for some time after the update.
+     */
+    public function validateForCsrf(RequestInterface $request): ?bool
+    {
+        if ($request->getParam('form_key') === null) {
+            return true;
+        }
+
+        return $this->_objectManager->get(FormKeyValidator::class)->validate($request);
+    }
+
+    public function createCsrfValidationException(RequestInterface $request): ?InvalidRequestException
+    {
+        // The request comes from the checkout script, which expects an address to open
+        return new InvalidRequestException(
+            $this->jsonFactory->create()->setData(['url' => $this->_url->getUrl('checkout/cart')]),
+            [__('Invalid Form Key. Please refresh the page.')]
+        );
+    }
+
     /**
      * @var Session
      */
@@ -113,14 +143,33 @@ class Redirect extends Action
 
         $saleStarted = false;
 
+        // Repeated requests for one order are handled one after another
+        $orderLock = $this->_objectManager->get(OrderLock::class);
+        $locked = $orderLock->lock($orderId);
+
         try {
 
             /**
              * @var PaynetEasy
              */
             $payneteasy = $order->getPayment()->getMethodInstance();
+
+            // A repeated request does not start a second sale while an earlier
+            // attempt is approved or still processing: the customer goes on with it.
+            if (!$locked || $this->hasActiveAttempt($payneteasy, $order, $orderLock)) {
+                $saleStarted = true;
+                $started = (array) $session->getPaynetEasyStartedSale();
+
+                return $this->jsonFactory->create()->setData([
+                    'url' => isset($started['order_id'], $started['url']) && (int) $started['order_id'] === (int) $orderId
+                        ? $started['url']
+                        : $payneteasy->getCustomerReturnUrl($order),
+                ]);
+            }
+
             $url = $payneteasy->getCheckoutRedirect($order);
             $saleStarted = true;
+            $session->setPaynetEasyStartedSale(['order_id' => (int) $orderId, 'url' => $url]);
 
             $order->setStatus(Order::STATE_PENDING_PAYMENT);
             $order->setState(Order::STATE_PENDING_PAYMENT);
@@ -166,6 +215,40 @@ class Redirect extends Action
             return $this->jsonFactory->create()->setData([
                 'url' => $this->_url->getUrl('checkout/cart'),
             ]);
+        } finally {
+            if ($locked) {
+                $orderLock->unlock($orderId);
+            }
         }
+    }
+
+
+    /**
+     * True if the order has a payment attempt that is approved or still
+     * processing, or whose status cannot be read now.
+     *
+     * @param PaynetEasy $payneteasy
+     * @param Order $order
+     * @param OrderLock $orderLock
+     *
+     * @return bool
+     */
+    private function hasActiveAttempt($payneteasy, $order, $orderLock)
+    {
+        if (!$payneteasy->getPaymentAttempts($order)) {
+            return false;
+        }
+
+        if (!$orderLock->allowStatusRequest($order->getId())) {
+            return true;
+        }
+
+        try {
+            $response = $payneteasy->getPaymentStatus($order);
+        } catch (\Throwable $e) {
+            return true;
+        }
+
+        return in_array(trim($response['status']), ['approved', 'processing'], true);
     }
 }

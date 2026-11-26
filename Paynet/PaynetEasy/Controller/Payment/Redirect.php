@@ -111,6 +111,8 @@ class Redirect extends Action
             ]);
         }
 
+        $saleStarted = false;
+
         try {
 
             /**
@@ -118,6 +120,7 @@ class Redirect extends Action
              */
             $payneteasy = $order->getPayment()->getMethodInstance();
             $url = $payneteasy->getCheckoutRedirect($order);
+            $saleStarted = true;
 
             $order->setStatus(Order::STATE_PENDING_PAYMENT);
             $order->setState(Order::STATE_PENDING_PAYMENT);
@@ -142,12 +145,27 @@ class Redirect extends Action
                 'line_exception' => $e->getLine(),
             ]);
 
-            $this->messageManager->addErrorMessage($e->getMessage());
+            // No sale was created at the gateway, the order cannot be paid: cancel it,
+            // so the stock is released. An order with a started sale is left as it is.
+            try {
+                if (!$saleStarted && $order->canCancel()) {
+                    $order->cancel();
+                    $order->addCommentToStatusHistory(__('PaynetEasy: the payment request was not accepted.'));
+                    $this->orderRepository->save($order);
+                }
+            } catch (\Throwable $cancelError) {
+                $this->paynetEasyLogger->log($this, 'error', __FUNCTION__ . ' > order ' . $orderId . ' was not canceled: ' . $cancelError->getMessage());
+            }
 
-            $resultRedirect = $this->resultRedirectFactory->create();
-            $resultRedirect->setUrl($this->_redirect->getRefererUrl());
+            // Only a message meant for the customer is shown, never a technical one
+            $this->messageManager->addErrorMessage($e instanceof LocalizedException
+                ? $e->getMessage()
+                : __('The payment could not be started. Please try again or use another payment method.'));
 
-            return $resultRedirect;
+            // The request comes from the checkout script, which expects an address to open
+            return $this->jsonFactory->create()->setData([
+                'url' => $this->_url->getUrl('checkout/cart'),
+            ]);
         }
     }
 }

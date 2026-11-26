@@ -241,14 +241,14 @@ class PaynetEasy extends AbstractMethod
             );
 
         $email = $order->getCustomerEmail();
-        $shippingAddress = $order->getShippingAddress();
         $billingAddress = $order->getBillingAddress();
+        // A virtual order has no shipping address
+        $shippingAddress = $order->getShippingAddress() ?: $billingAddress;
         $street = $shippingAddress->getStreet()?:$billingAddress->getStreet();
         $city = $shippingAddress->getCity()?:$billingAddress->getCity();
         $phone = $shippingAddress->getTelephone()?:$billingAddress->getTelephone();
         $postcode = $shippingAddress->getPostcode()?:$billingAddress->getPostcode();
-        $getShippingAddress = $order->getShippingAddress()->getData();
-        $countryCode = $getShippingAddress['country_id'];
+        $countryCode = $shippingAddress->getCountryId() ?: $billingAddress->getCountryId();
         $payment = $order->getPayment();
         $additionalInformation = $payment->getAdditionalInformation();
 
@@ -307,6 +307,8 @@ class PaynetEasy extends AbstractMethod
                 $action_url,
                 $payment_payneteasy_endpoint_id
             );
+        } else {
+            $response = [];
         }
 
         $this->paynetEasyLogger->log($this, 'debug', __FUNCTION__ . ' > getOrderLink', [
@@ -322,9 +324,13 @@ class PaynetEasy extends AbstractMethod
             ->get('Magento\Framework\App\ResourceConnection');
         $connection= $_resources->getConnection();
         $tableName = $connection->getTableName('payneteasy_payments');
+        // The gateway did not accept the sale: nothing to remember, the order is not paid this way
+        if (empty($response['paynet-order-id'])) {
+            throw new LocalizedException(__('The payment could not be started. Please try again or use another payment method.'));
+        }
         $insertData = [
-            'paynet_order_id' => $response['paynet-order-id'],
-            'merchant_order_id' => $response['merchant-order-id'],
+            'paynet_order_id' => trim((string)$response['paynet-order-id']),
+            'merchant_order_id' => (int)$orderId,
         ];
 
         $connection->insert($tableName, $insertData);

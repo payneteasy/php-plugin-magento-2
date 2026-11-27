@@ -551,6 +551,9 @@ class PaynetEasy extends AbstractMethod
      */
     public function isAvailable(?CartInterface $quote = null): bool
     {
+        // Called when the checkout lists the payment methods
+        $this->removeExpiredCardData();
+
         if (!$this->isActive($quote ? $quote->getStoreId() : null)) {
             return false;
         }
@@ -656,7 +659,7 @@ class PaynetEasy extends AbstractMethod
         $this->_checkoutSession->unsPaynetEasyCardData();
 
         $card_data = [];
-        if (isset($stored['data'], $stored['expires']) && (int)$stored['expires'] >= time()) {
+        if ($this->isCardDataValid($stored)) {
             $card_data = (array)json_decode((string)$this->getEncryptor()->decrypt((string)$stored['data']), true);
         }
 
@@ -666,5 +669,27 @@ class PaynetEasy extends AbstractMethod
         }
 
         return $result;
+    }
+
+    /**
+     * Removes card data from the checkout session when it is older than CARD_TTL seconds.
+     *
+     * @return void
+     */
+    private function removeExpiredCardData()
+    {
+        $stored = $this->_checkoutSession->getPaynetEasyCardData();
+        if ($stored !== null && !$this->isCardDataValid((array)$stored)) {
+            $this->_checkoutSession->unsPaynetEasyCardData();
+        }
+    }
+
+    /**
+     * @param array $stored Card data from the checkout session
+     * @return bool
+     */
+    private function isCardDataValid(array $stored)
+    {
+        return isset($stored['data'], $stored['expires']) && (int)$stored['expires'] >= time();
     }
 }
